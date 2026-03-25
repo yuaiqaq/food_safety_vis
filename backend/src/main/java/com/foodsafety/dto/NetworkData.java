@@ -5,7 +5,6 @@ import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
-import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -13,4 +12,5 @@ import java.util.Map;
 public class NetworkData {
     private List<NetworkNode> nodes;
     private List<NetworkEdge> edges;
+    private List<NetworkCategory> categories;
 }

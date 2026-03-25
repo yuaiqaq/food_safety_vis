@@ -17,14 +17,15 @@ public class NetworkNode {
     private String name;
 
     /**
-     * Node category (for substrate: riskLevel; for catalyst: attribute type)
-     * Used for ECharts graph category coloring
+     * Category index (maps to categories list in NetworkData).
+     * Substrate: 0=minor(grade0), 1=light(grade1), 2=medium(grade2), 3=severe(grade3)
+     * Catalyst: 0=region, 1=foodCategory, 2=adulterantCategory, 3=adulterant
      */
-    private String category;
+    private int category;
 
-    /** Visual size weight (e.g., count of connections) */
+    /** Visual size weight */
     private int value;
 
-    /** Additional properties */
+    /** Additional properties for tooltip/detail */
     private Map<String, Object> properties;
 }
