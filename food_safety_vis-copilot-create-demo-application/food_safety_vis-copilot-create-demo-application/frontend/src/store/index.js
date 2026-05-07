@@ -89,6 +89,7 @@ export const useMainStore = defineStore('main', {
       try {
         const params = this.activeFilters()
         params.maxNodes = 200
+        params.useSnapshot = true
         const res = await fetchSubstrateNetwork(params)
         this.substrateNetwork = res.data
         this.selectedSubstrateIds = []

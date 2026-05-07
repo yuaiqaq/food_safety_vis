@@ -119,6 +119,7 @@ npm run dev
 | GET | `/api/stats/categories` | 食品类别列表 |
 | GET | `/api/stats/adulterant-categories` | 违规类型列表 |
 | GET | `/api/network/substrate` | 样本网络（节点+边），支持筛选参数 |
+| POST | `/api/network/substrate/snapshot` | 保存样本网络布局快照（节点 id + x/y 坐标） |
 | GET | `/api/network/catalyst` | 属性关联网络（节点+边），支持筛选参数 |
 | GET | `/api/samples` | 样本列表（分页+多维度筛选） |
 | POST | `/api/pivot/sample-to-attr` | 从样本 ID 列表 → 属性画像 |
@@ -129,6 +130,9 @@ npm run dev
 - `category`: 食品类别（如 `pastry`）
 - `adulterantCategory`: 违规类型（如 `Food additive`）
 - `grade`: 违规等级（0/1/2/3）
+
+`/api/network/substrate` 额外支持：
+- `useSnapshot`（默认 `true`）：若已存在全部节点坐标快照，则直接返回快照坐标并跳过力导迭代
 
 ---
 

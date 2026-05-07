@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 public class NetworkService {
 
     private final FoodSampleRepository repository;
+    private final SubstrateSnapshotService substrateSnapshotService;
 
     // Substrate network categories (by grade severity)
     private static final List<NetworkCategory> SUBSTRATE_CATEGORIES = List.of(
@@ -39,7 +40,7 @@ public class NetworkService {
      */
     public NetworkData buildSubstrateNetwork(String region, String category,
                                               String adulterantCategory, String adulterants,
-                                              int maxNodes) {
+                                              int maxNodes, boolean useSnapshot) {
         List<FoodSample> samples = repository.findByFilters(region, category, adulterantCategory,adulterants,"AND");
 
         // Limit to maxNodes using deterministic shuffle for reproducibility
@@ -71,8 +72,24 @@ public class NetworkService {
                     "样品#" + s.getId(),
                     gradeVal,
                     symbolSize,
+                    null,
+                    null,
                     props
             ));
+        }
+
+        if (useSnapshot && !nodes.isEmpty()) {
+            List<String> nodeIds = nodes.stream().map(NetworkNode::getId).collect(Collectors.toList());
+            Map<String, SnapshotNodePosition> savedPositions = substrateSnapshotService.loadPositions(nodeIds);
+            if (savedPositions.size() == nodes.size()) {
+                for (NetworkNode node : nodes) {
+                    SnapshotNodePosition pos = savedPositions.get(node.getId());
+                    if (pos != null) {
+                        node.setX(pos.getX());
+                        node.setY(pos.getY());
+                    }
+                }
+            }
         }
 
         // Build edges: group by (foodCategory + adulterantCategory) and link within each group
@@ -201,7 +218,7 @@ public class NetworkService {
             props.put("type", "省份");
             props.put("count", regionCount.get(r));
             nodeMap.put(nodeId, new NetworkNode(nodeId, r, 0,
-                    (int) Math.min(regionCount.getOrDefault(r, 1L), 60), props));
+                    (int) Math.min(regionCount.getOrDefault(r, 1L), 60), null, null, props));
         }
         for (String c : allCategories) {
             String nodeId = "cat_" + c;
@@ -209,7 +226,7 @@ public class NetworkService {
             Map<String, Object> props = new LinkedHashMap<>();
             props.put("type", "食品类别");
             props.put("count", cnt);
-            nodeMap.put(nodeId, new NetworkNode(nodeId, c, 1, (int) Math.min(cnt / 10 + 10, 50), props));
+            nodeMap.put(nodeId, new NetworkNode(nodeId, c, 1, (int) Math.min(cnt / 10 + 10, 50), null, null, props));
         }
         for (String ac : allAdulterantCats) {
             String nodeId = "acat_" + ac;
@@ -217,7 +234,7 @@ public class NetworkService {
             Map<String, Object> props = new LinkedHashMap<>();
             props.put("type", "违规类型");
             props.put("count", cnt);
-            nodeMap.put(nodeId, new NetworkNode(nodeId, ac, 2, (int) Math.min(cnt / 8 + 12, 55), props));
+            nodeMap.put(nodeId, new NetworkNode(nodeId, ac, 2, (int) Math.min(cnt / 8 + 12, 55), null, null, props));
         }
         for (String a : topAdulterants) {
             String nodeId = "adu_" + a;
@@ -225,7 +242,7 @@ public class NetworkService {
             Map<String, Object> props = new LinkedHashMap<>();
             props.put("type", "违规项目");
             props.put("count", cnt);
-            nodeMap.put(nodeId, new NetworkNode(nodeId, a, 3, (int) Math.min(cnt / 5 + 8, 45), props));
+            nodeMap.put(nodeId, new NetworkNode(nodeId, a, 3, (int) Math.min(cnt / 5 + 8, 45), null, null, props));
         }
 
         // ---- Build co-occurrence edges ----
@@ -261,5 +278,9 @@ public class NetworkService {
                 .collect(Collectors.toList());
 
         return new NetworkData(new ArrayList<>(nodeMap.values()), edges, CATALYST_CATEGORIES);
+    }
+
+    public void saveSubstrateSnapshot(List<SnapshotNodePosition> positions) {
+        substrateSnapshotService.savePositions(positions);
     }
 }

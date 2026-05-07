@@ -1,9 +1,13 @@
 package com.foodsafety.controller;
 
 import com.foodsafety.dto.NetworkData;
+import com.foodsafety.dto.SubstrateSnapshotRequest;
 import com.foodsafety.service.NetworkService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Collections;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/network")
@@ -28,8 +32,18 @@ public class NetworkController {
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String adulterantCategory,
             @RequestParam(required = false) String adulterants,
-            @RequestParam(defaultValue = "200") int maxNodes) {
-        return networkService.buildSubstrateNetwork(region, category, adulterantCategory, adulterants, maxNodes);
+            @RequestParam(defaultValue = "200") int maxNodes,
+            @RequestParam(defaultValue = "true") boolean useSnapshot) {
+        return networkService.buildSubstrateNetwork(region, category, adulterantCategory, adulterants, maxNodes, useSnapshot);
+    }
+
+    @PostMapping("/substrate/snapshot")
+    public Map<String, Integer> saveSubstrateSnapshot(@RequestBody(required = false) SubstrateSnapshotRequest request) {
+        if (request == null || request.getNodes() == null || request.getNodes().isEmpty()) {
+            return Collections.singletonMap("saved", 0);
+        }
+        networkService.saveSubstrateSnapshot(request.getNodes());
+        return Collections.singletonMap("saved", request.getNodes().size());
     }
 
     /**

@@ -21,12 +21,24 @@
           <span class="mode-hint">{{ pivotModeHint }}</span>
         </div>
       </div>
-      <span class="network-subtitle">节点 = 食品样本，颜色 = 违规等级，大小 = 严重程度</span>
+      <span class="network-subtitle">节点 = 食品样本，颜色 = 违规等级，大小 = 严重程度（按住 Shift 可框选）</span>
     </div>
     <div v-if="store.loadingSubstrate" class="loading-mask">
       <el-icon class="is-loading"><Loading /></el-icon> 加载中...
     </div>
-    <div ref="chartEl" class="chart" />
+    <div class="chart-wrapper">
+      <div ref="chartEl" class="chart" />
+      <div
+        v-if="lassoRect.visible"
+        class="lasso-rect"
+        :style="{
+          left: `${lassoRect.left}px`,
+          top: `${lassoRect.top}px`,
+          width: `${lassoRect.width}px`,
+          height: `${lassoRect.height}px`,
+        }"
+      />
+    </div>
     <div v-if="store.selectedSubstrateIds.length" class="selection-info">
       已选 {{ store.selectedSubstrateIds.length }} 个样本
       <el-button size="small" type="warning" @click="clearSelection">清除</el-button>
@@ -38,10 +50,16 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
 import { useMainStore } from '../store/index.js'
+import { saveSubstrateSnapshot } from '../api/index.js'
 
 const store = useMainStore()
 const chartEl = ref(null)
 let chart = null
+let lastSnapshotKey = ''
+let snapshotSaving = false
+let isLassoSelecting = false
+const lassoStart = { x: 0, y: 0 }
+const lassoRect = ref({ visible: false, left: 0, top: 0, width: 0, height: 0 })
 
 // ⭐ 添加这些缺失的响应式变量
 const pivotMode = ref('OR')  // 'OR' 或 'AND'
@@ -60,9 +78,12 @@ const GRADE_COLORS = ['#52c41a', '#faad14', '#fa8c16', '#f5222d']
 const GRADE_LABELS = ['轻微(0)', '较轻(1)', '中等(2)', '严重(3)']
 
 function buildOption(data, highlightIds) {
+  const hasSnapshotLayout = data.nodes.length > 0 && data.nodes.every(
+    n => Number.isFinite(n.x) && Number.isFinite(n.y)
+  )
   const nodes = data.nodes.map(n => {
     const isHighlighted = !highlightIds.size || highlightIds.has(n.id)
-    return {
+    const node = {
       id: n.id,
       name: n.name,
       category: n.category,
@@ -76,6 +97,12 @@ function buildOption(data, highlightIds) {
       label: { show: false },
       extra: n.properties,
     }
+    if (hasSnapshotLayout) {
+      node.x = n.x
+      node.y = n.y
+      node.fixed = true
+    }
+    return node
   })
 
   const filteredEdges = data.edges.filter(e => (e.value || 1) > 5);
@@ -145,13 +172,13 @@ function buildOption(data, highlightIds) {
     },
     series: [{
       type: 'graph',
-      layout: 'force',
+      layout: hasSnapshotLayout ? 'none' : 'force',
       data: nodes,
       links: edges,
       categories: data.categories?.map((c, i) => ({ name: GRADE_LABELS[i] || c.name, itemStyle: { color: GRADE_COLORS[i] } })) || [],
       roam: true,
       draggable: true,
-      force: {
+      force: hasSnapshotLayout ? undefined : {
         repulsion: 300,
         gravity: 0.03,
         edgeLength: [80, 150],
@@ -185,18 +212,93 @@ async function setPivotMode(mode) {
   await store.onSubstrateSelected(store.selectedSubstrateIds,mode)
 }
 
+function updateLassoRect(currentX, currentY) {
+  const left = Math.min(lassoStart.x, currentX)
+  const top = Math.min(lassoStart.y, currentY)
+  const width = Math.abs(currentX - lassoStart.x)
+  const height = Math.abs(currentY - lassoStart.y)
+  lassoRect.value = { visible: true, left, top, width, height }
+}
+
+function resetLassoRect() {
+  lassoRect.value = { visible: false, left: 0, top: 0, width: 0, height: 0 }
+}
+
+function collectSelectedIdsFromRect(rect) {
+  const selectedIndices = new Set()
+  const seriesModel = chart?.getModel()?.getSeriesByIndex(0)
+  const seriesData = seriesModel?.getData()
+  if (!seriesData) return []
+
+  const minX = rect.left
+  const maxX = rect.left + rect.width
+  const minY = rect.top
+  const maxY = rect.top + rect.height
+
+  seriesData.each((idx) => {
+    const layout = seriesData.getItemLayout(idx)
+    if (!layout) return
+    if (layout.x >= minX && layout.x <= maxX && layout.y >= minY && layout.y <= maxY) {
+      selectedIndices.add(idx)
+    }
+  })
+
+  return Array.from(selectedIndices)
+    .map(idx => store.substrateNetwork.nodes[idx]?.id)
+    .filter(Boolean)
+}
+
+function getSnapshotNodesFromChart() {
+  const optionNodes = chart?.getOption()?.series?.[0]?.data || []
+  return optionNodes
+    .map(node => ({
+      id: node.id != null ? String(node.id) : null,
+      x: Number(node.x),
+      y: Number(node.y),
+    }))
+    .filter(node => node.id && Number.isFinite(node.x) && Number.isFinite(node.y))
+}
+
+async function saveLayoutSnapshot() {
+  if (!chart || snapshotSaving) return
+  const snapshotNodes = getSnapshotNodesFromChart()
+  if (!snapshotNodes.length || snapshotNodes.length !== store.substrateNetwork.nodes.length) return
+
+  const snapshotKey = snapshotNodes.map(n => n.id).sort().join(',')
+  if (snapshotKey === lastSnapshotKey) return
+
+  snapshotSaving = true
+  try {
+    await saveSubstrateSnapshot(snapshotNodes)
+    lastSnapshotKey = snapshotKey
+  } catch (error) {
+    console.error('保存样本网络快照失败:', error)
+  } finally {
+    snapshotSaving = false
+  }
+}
+
 function initChart() {
   if (!chartEl.value) return
   chart = echarts.init(chartEl.value, 'dark')
 
   chart.on('selectchanged', (evt) => {
     const selectedIndices = new Set()
-    
-    if (evt.selected && evt.selected[0]) {
-      const selectedSeries = evt.selected[0]
-      selectedSeries.dataIndex?.forEach(idx => selectedIndices.add(idx))
+
+    if (evt.batch && evt.batch.length) {
+      evt.batch.forEach(batch => {
+        if (batch.selected && batch.selected.length) {
+          batch.selected.forEach(series => {
+            series.dataIndex?.forEach(idx => selectedIndices.add(idx))
+          })
+        }
+      })
+    } else if (evt.selected && evt.selected.length) {
+      evt.selected.forEach(series => {
+        series.dataIndex?.forEach(idx => selectedIndices.add(idx))
+      })
     }
-    
+
     const ids = Array.from(selectedIndices).map(idx => {
       const node = store.substrateNetwork.nodes[idx]
       return node ? node.id : null
@@ -213,10 +315,63 @@ function initChart() {
     }
   })
 
+  chart.on('finished', async () => {
+    const hasSnapshotLayout = store.substrateNetwork.nodes.length > 0
+      && store.substrateNetwork.nodes.every(node => Number.isFinite(node.x) && Number.isFinite(node.y))
+    if (!hasSnapshotLayout) {
+      await saveLayoutSnapshot()
+    }
+  })
+
   chart.on('dblclick', () => {
     chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: 'all' })
     store.selectedSubstrateIds = []
     store.highlightAttrIds = new Set()
+  })
+
+  const zr = chart.getZr()
+  zr.on('mousedown', (evt) => {
+    const nativeEvent = evt.event
+    if (!nativeEvent?.shiftKey || nativeEvent.button !== 0) return
+    isLassoSelecting = true
+    lassoStart.x = nativeEvent.offsetX
+    lassoStart.y = nativeEvent.offsetY
+    updateLassoRect(nativeEvent.offsetX, nativeEvent.offsetY)
+  })
+
+  zr.on('mousemove', (evt) => {
+    if (!isLassoSelecting) return
+    const nativeEvent = evt.event
+    updateLassoRect(nativeEvent.offsetX, nativeEvent.offsetY)
+  })
+
+  zr.on('mouseup', (evt) => {
+    if (!isLassoSelecting) return
+    isLassoSelecting = false
+    const nativeEvent = evt.event
+    updateLassoRect(nativeEvent.offsetX, nativeEvent.offsetY)
+    const rect = lassoRect.value
+    const ids = collectSelectedIdsFromRect(rect)
+    resetLassoRect()
+
+    chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: 'all' })
+    ids.forEach((id) => {
+      const idx = store.substrateNetwork.nodes.findIndex(node => node.id === id)
+      if (idx >= 0) {
+        chart.dispatchAction({ type: 'select', seriesIndex: 0, dataIndex: idx })
+      }
+    })
+
+    store.selectedSubstrateIds = ids
+    if (!ids.length) {
+      store.highlightAttrIds = new Set()
+    }
+  })
+
+  zr.on('globalout', () => {
+    if (!isLassoSelecting) return
+    isLassoSelecting = false
+    resetLassoRect()
   })
 }
 
@@ -224,6 +379,11 @@ function renderChart() {
   if (!chart) return
   const option = buildOption(store.substrateNetwork, store.highlightSampleIds)
   chart.setOption(option, true)
+  if (store.substrateNetwork.nodes.length > 0 && store.substrateNetwork.nodes.every(
+    node => Number.isFinite(node.x) && Number.isFinite(node.y)
+  )) {
+    lastSnapshotKey = store.substrateNetwork.nodes.map(node => node.id).sort().join(',')
+  }
 }
 
 onMounted(async () => {
@@ -244,6 +404,8 @@ watch(() => store.highlightSampleIds, () => renderChart(), { deep: true })
 // ⭐ 修复清除功能
 function clearSelection() {
   console.log('清除所有选中')
+  resetLassoRect()
+  isLassoSelecting = false
   
   if (chart) {
     chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: 'all' })
@@ -309,8 +471,20 @@ function clearSelection() {
   border-radius: 4px;
 }
 .chart {
+  width: 100%;
+  height: 100%;
+}
+.chart-wrapper {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+.lasso-rect {
+  position: absolute;
+  border: 1px dashed #5bc8f5;
+  background: rgba(91, 200, 245, 0.15);
+  pointer-events: none;
+  z-index: 6;
 }
 .loading-mask {
   position: absolute;

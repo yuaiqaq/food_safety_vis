@@ -26,6 +26,12 @@ public class NetworkNode {
     /** Visual size weight */
     private int value;
 
+    /** Optional x position for persisted layout snapshots */
+    private Double x;
+
+    /** Optional y position for persisted layout snapshots */
+    private Double y;
+
     /** Additional properties for tooltip/detail */
     private Map<String, Object> properties;
 }

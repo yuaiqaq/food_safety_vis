@@ -13,6 +13,7 @@ export const fetchAdulterantCategories = () => api.get('/stats/adulterant-catego
 export const fetchAdulterants = () => api.get('/stats/adulterants')
 export const fetchSubstrateNetwork = (params) => api.get('/network/substrate', { params })
 export const fetchCatalystNetwork = (params) => api.get('/network/catalyst', { params })
+export const saveSubstrateSnapshot = (nodes) => api.post('/network/substrate/snapshot', { nodes })
 
 
 export const fetchSamples = (params) => api.get('/samples', { params })
@@ -21,4 +22,3 @@ export const fetchSampleById = (id) => api.get(`/samples/${id}`)
 export const pivotSampleToAttr = (ids, mode) => api.post('/pivot/sample-to-attr', { ids, mode })
 export const pivotAttrToSample = (ids, mode, filters) => api.post('/pivot/attr-to-sample', { ids, mode, ...filters })
 // api/index.js
-
