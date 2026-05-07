@@ -37,6 +37,8 @@ public class NetworkService {
      * Build the substrate (sample) network.
      * Nodes = food samples (up to maxNodes), coloured by grade.
      * Edges = connect samples sharing the same (foodCategory + adulterantCategory).
+     *
+     * @param useSnapshot when true, loads persisted x/y coordinates from snapshot storage when available
      */
     public NetworkData buildSubstrateNetwork(String region, String category,
                                               String adulterantCategory, String adulterants,
@@ -81,13 +83,11 @@ public class NetworkService {
         if (useSnapshot && !nodes.isEmpty()) {
             List<String> nodeIds = nodes.stream().map(NetworkNode::getId).collect(Collectors.toList());
             Map<String, SnapshotNodePosition> savedPositions = substrateSnapshotService.loadPositions(nodeIds);
-            if (savedPositions.size() == nodes.size()) {
-                for (NetworkNode node : nodes) {
-                    SnapshotNodePosition pos = savedPositions.get(node.getId());
-                    if (pos != null) {
-                        node.setX(pos.getX());
-                        node.setY(pos.getY());
-                    }
+            for (NetworkNode node : nodes) {
+                SnapshotNodePosition pos = savedPositions.get(node.getId());
+                if (pos != null) {
+                    node.setX(pos.getX());
+                    node.setY(pos.getY());
                 }
             }
         }

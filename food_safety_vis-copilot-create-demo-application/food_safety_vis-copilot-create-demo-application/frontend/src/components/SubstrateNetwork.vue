@@ -57,6 +57,7 @@ const chartEl = ref(null)
 let chart = null
 let lastSnapshotKey = ''
 let snapshotSaving = false
+let layoutNeedsSnapshot = false
 let isLassoSelecting = false
 const lassoStart = { x: 0, y: 0 }
 const lassoRect = ref({ visible: false, left: 0, top: 0, width: 0, height: 0 })
@@ -259,18 +260,25 @@ function getSnapshotNodesFromChart() {
     .filter(node => node.id && Number.isFinite(node.x) && Number.isFinite(node.y))
 }
 
+function buildSnapshotKey(snapshotNodes) {
+  if (!snapshotNodes.length) return ''
+  const sortedIds = snapshotNodes.map(n => n.id).sort()
+  return sortedIds.join('|')
+}
+
 async function saveLayoutSnapshot() {
-  if (!chart || snapshotSaving) return
+  if (!chart || snapshotSaving || !layoutNeedsSnapshot) return
   const snapshotNodes = getSnapshotNodesFromChart()
   if (!snapshotNodes.length || snapshotNodes.length !== store.substrateNetwork.nodes.length) return
 
-  const snapshotKey = snapshotNodes.map(n => n.id).sort().join(',')
+  const snapshotKey = buildSnapshotKey(snapshotNodes)
   if (snapshotKey === lastSnapshotKey) return
 
   snapshotSaving = true
   try {
     await saveSubstrateSnapshot(snapshotNodes)
     lastSnapshotKey = snapshotKey
+    layoutNeedsSnapshot = false
   } catch (error) {
     console.error('保存样本网络快照失败:', error)
   } finally {
@@ -382,7 +390,10 @@ function renderChart() {
   if (store.substrateNetwork.nodes.length > 0 && store.substrateNetwork.nodes.every(
     node => Number.isFinite(node.x) && Number.isFinite(node.y)
   )) {
-    lastSnapshotKey = store.substrateNetwork.nodes.map(node => node.id).sort().join(',')
+    lastSnapshotKey = buildSnapshotKey(store.substrateNetwork.nodes)
+    layoutNeedsSnapshot = false
+  } else {
+    layoutNeedsSnapshot = store.substrateNetwork.nodes.length > 0
   }
 }
 

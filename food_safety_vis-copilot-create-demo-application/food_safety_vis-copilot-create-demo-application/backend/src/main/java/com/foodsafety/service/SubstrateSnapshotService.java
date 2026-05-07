@@ -25,13 +25,17 @@ public class SubstrateSnapshotService {
     }
 
     @PostConstruct
-    void init() throws IOException {
-        Path parent = snapshotPath.getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
-        }
-        if (!Files.exists(snapshotPath)) {
-            Files.write(snapshotPath, List.of(HEADER), StandardCharsets.UTF_8);
+    void init() {
+        try {
+            Path parent = snapshotPath.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            if (!Files.exists(snapshotPath)) {
+                Files.write(snapshotPath, List.of(HEADER), StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to initialize substrate snapshot file: " + snapshotPath, e);
         }
     }
 
