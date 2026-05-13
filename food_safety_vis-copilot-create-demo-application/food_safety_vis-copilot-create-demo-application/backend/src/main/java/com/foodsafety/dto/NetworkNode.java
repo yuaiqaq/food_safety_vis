@@ -10,22 +10,13 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class NetworkNode {
-    /** Unique node identifier */
     private String id;
-
-    /** Display label */
     private String name;
-
-    /**
-     * Category index (maps to categories list in NetworkData).
-     * Substrate: 0=minor(grade0), 1=light(grade1), 2=medium(grade2), 3=severe(grade3)
-     * Catalyst: 0=region, 1=foodCategory, 2=adulterantCategory, 3=adulterant
-     */
     private int category;
-
-    /** Visual size weight */
     private int value;
-
-    /** Additional properties for tooltip/detail */
     private Map<String, Object> properties;
+
+    // 坐标字段
+    private Double x;
+    private Double y;
 }

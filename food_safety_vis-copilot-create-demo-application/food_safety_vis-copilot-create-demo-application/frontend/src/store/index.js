@@ -2,38 +2,49 @@ import { defineStore } from 'pinia'
 import {
   fetchOverview, fetchRegions, fetchCategories, fetchAdulterantCategories,
   fetchSubstrateNetwork, fetchCatalystNetwork,
-  pivotSampleToAttr, pivotAttrToSample,fetchAdulterants,fetchGrade
+  pivotSampleToAttr, pivotAttrToSample, fetchAdulterants, fetchGrade,
+  saveSubstrateLayout,
 } from '../api/index.js'
+
+// ✅ 安全 Base64（支持中文，不报错）
+function toBase64(str) {
+  if (typeof TextEncoder !== 'undefined') {
+    const encoder = new TextEncoder()
+    const uint8Array = encoder.encode(str)
+    let binary = ''
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i])
+    }
+    return btoa(binary)
+  }
+
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) =>
+    String.fromCharCode(parseInt(p1, 16))
+  ))
+}
 
 export const useMainStore = defineStore('main', {
   state: () => ({
-    // Filter state
     filters: {
       region: null,
       category: null,
       adulterantCategory: null,
       adulterants: null,
     },
-    // Options for dropdowns
     regions: [],
     categories: [],
     adulterantCategories: [],
     adulterants: [],
-    grade:null,
-    // Overview stats
+    grade: null,
     overview: null,
-    // Network data
     substrateNetwork: { nodes: [], edges: [], categories: [] },
     catalystNetwork: { nodes: [], edges: [], categories: [] },
-    // Pivot / selection state
-    selectedSubstrateIds: [],    // selected sample node IDs (strings)
-    selectedCatalystIds: [],     // selected catalyst node IDs (strings)
-    highlightSampleIds: new Set(), // highlighted by pivot
-    highlightAttrIds: new Set(),   // highlighted by pivot
-    // Pivot result
+    selectedSubstrateIds: [],
+    selectedCatalystIds: [],
+    highlightSampleIds: new Set(),
+    highlightAttrIds: new Set(),
     pivotAttrProfile: null,
     pivotSampleCount: null,
-    // Loading flags
     loadingSubstrate: false,
     loadingCatalyst: false,
     loadingOverview: false,
@@ -46,14 +57,13 @@ export const useMainStore = defineStore('main', {
         this.loadRegions(),
         this.loadCategories(),
         this.loadAdulterantCategories(),
-        this.loadAdulterants() ,
+        this.loadAdulterants(),
         this.loadOverview(),
-        this.loadFiltersGrades(), // 提前加载grade数据
+        this.loadFiltersGrades(),
       ])
       await Promise.all([
         this.loadSubstrateNetwork(),
         this.loadCatalystNetwork(),
-
       ])
     },
 
@@ -76,7 +86,6 @@ export const useMainStore = defineStore('main', {
     async loadOverview() {
       this.loadingOverview = true
       try {
-  
         const res = await fetchOverview()
         this.overview = res.data
       } finally {
@@ -84,15 +93,27 @@ export const useMainStore = defineStore('main', {
       }
     },
 
+    // ====================== ✅ 修复：查询时统一 filterKey ======================
     async loadSubstrateNetwork() {
       this.loadingSubstrate = true
       try {
+        // 1. 获取纯筛选条件
         const params = this.activeFilters()
+
+        // 2. ✅ 生成统一的 filterKey（绝对不带 maxNodes）
+        const filterKey = toBase64(JSON.stringify(params))
+
+        // 3. 追加参数，不影响 filterKey
         params.maxNodes = 200
+        params.filterKey = filterKey
+
         const res = await fetchSubstrateNetwork(params)
         this.substrateNetwork = res.data
+
         this.selectedSubstrateIds = []
         this.highlightSampleIds = new Set()
+      } catch (err) {
+        console.error("❌ 请求底物网络失败：", err)
       } finally {
         this.loadingSubstrate = false
       }
@@ -110,21 +131,23 @@ export const useMainStore = defineStore('main', {
         this.loadingCatalyst = false
       }
     },
-  async loadFiltersGrades() {
-    console.log('loadFiltersGrades 开始执行')  // 调试日志
-    this.loadingGroup = true
-    try {
-      const param = this.activeFilters()
-      console.log('grade请求参数:', param)  // 调试日志
-      const res = await fetchGrade(param)
-      console.log('grade返回数据:', res.data)  // 调试日志
-      this.grade = res.data
-    } catch (error) {
-      console.error('加载grade数据失败:', error)
-    } finally {
-      this.loadingGroup = false
-    }
-  },
+
+    async loadFiltersGrades() {
+      console.log('loadFiltersGrades 开始执行')
+      this.loadingGroup = true
+      try {
+        const param = this.activeFilters()
+        console.log('grade请求参数:', param)
+        const res = await fetchGrade(param)
+        console.log('grade返回数据:', res.data)
+        this.grade = res.data
+      } catch (error) {
+        console.error('加载grade数据失败:', error)
+      } finally {
+        this.loadingGroup = false
+      }
+    },
+
     async applyFilters() {
       await Promise.all([
         this.loadSubstrateNetwork(),
@@ -141,8 +164,7 @@ export const useMainStore = defineStore('main', {
       this.applyFilters()
     },
 
-    /** Pivot: selected substrate samples → highlight catalyst attributes */
-    async onSubstrateSelected(nodeIds,mode) {
+    async onSubstrateSelected(nodeIds, mode) {
       this.selectedSubstrateIds = nodeIds
       if (!nodeIds.length) {
         this.highlightAttrIds = new Set()
@@ -150,41 +172,41 @@ export const useMainStore = defineStore('main', {
         return
       }
       const ids = nodeIds.map(id => parseInt(id))
-      const res = await pivotSampleToAttr(ids,mode)
+      const res = await pivotSampleToAttr(ids, mode)
       this.pivotAttrProfile = res.data
-      // Build set of catalyst node IDs to highlight
       const attrIds = new Set()
       const profile = res.data
-      console.log('Pivot profile:', profile) // 调试日志
+      console.log('Pivot profile:', profile)
       for (const r of Object.keys(profile.regions || {})) attrIds.add('region_' + r)
       for (const c of Object.keys(profile.categories || {})) attrIds.add('cat_' + c)
       for (const ac of Object.keys(profile.adulterantCategories || {})) attrIds.add('acat_' + ac)
       for (const a of Object.keys(profile.adulterants || {})) attrIds.add('adu_' + a)
       this.highlightAttrIds = attrIds
-      console.log('Highlighted attribute IDs:', attrIds) // 调试日志
+      console.log('Highlighted attribute IDs:', attrIds)
     },
 
-/** Pivot: selected catalyst attribute nodes → highlight substrate samples */
-async onCatalystSelected(nodeIds, mode) {
-  this.selectedCatalystIds = nodeIds;
-  if (!nodeIds.length) {
-    this.highlightSampleIds = new Set();
-    this.pivotSampleCount = null;
-    return;
-  }
+    async onCatalystSelected(nodeIds, mode) {
+      this.selectedCatalystIds = nodeIds;
+      if (!nodeIds.length) {
+        this.highlightSampleIds = new Set();
+        this.pivotSampleCount = null;
+        return;
+      }
+      const activeFilters = this.activeFilters();
+      const res = await pivotAttrToSample(nodeIds, mode, activeFilters);
+      this.pivotSampleCount = res.data.count;
+      this.highlightSampleIds = res.data.sampleIds.length
+        ? new Set(res.data.sampleIds.map(String))
+        : new Set(['-1']);
+    },
 
-  // ✅ 关键：把页面上的筛选器一起传给后端！
-  const activeFilters = this.activeFilters();
-
-  // ✅ 调用后端时，同时传递：节点IDs + mode + 筛选条件
-  const res = await pivotAttrToSample(nodeIds, mode, activeFilters);
-
-  this.pivotSampleCount = res.data.count;
- // 👇 空的时候插入一个不存在的 ID -1，保证不会高亮任何节点
-this.highlightSampleIds = res.data.sampleIds.length 
-  ? new Set(res.data.sampleIds.map(String)) 
-  : new Set(['-1']);
-},
+    // ====================== ✅ 修复：保存时使用完全相同的 filterKey ======================
+    async saveSubstrateLayout(nodes) {
+      // ✅ 关键：和查询用同一个筛选条件
+      const filterObj = this.activeFilters()
+      const filterKey = toBase64(JSON.stringify(filterObj))
+      await saveSubstrateLayout({ filterKey, nodes })
+    },
 
     activeFilters() {
       const p = {}

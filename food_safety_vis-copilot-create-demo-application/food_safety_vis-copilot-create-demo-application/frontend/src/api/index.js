@@ -20,5 +20,8 @@ export const fetchSampleById = (id) => api.get(`/samples/${id}`)
 
 export const pivotSampleToAttr = (ids, mode) => api.post('/pivot/sample-to-attr', { ids, mode })
 export const pivotAttrToSample = (ids, mode, filters) => api.post('/pivot/attr-to-sample', { ids, mode, ...filters })
+export const saveSubstrateLayout = (data) => api.post('/network/save-layout', data)
+export const getSubstrateLayout = (filterKey) => api.get('/network/substrate/layout', { params: { filterKey } })
+
 // api/index.js
 

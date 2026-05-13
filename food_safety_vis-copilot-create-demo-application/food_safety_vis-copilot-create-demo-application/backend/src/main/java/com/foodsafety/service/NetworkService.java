@@ -1,10 +1,17 @@
 package com.foodsafety.service;
 
-import com.foodsafety.dto.*;
+import com.foodsafety.dto.LayoutSave;
+import com.foodsafety.dto.NetworkData;
+import com.foodsafety.dto.NetworkEdge;
+import com.foodsafety.dto.NetworkNode;
+import com.foodsafety.dto.NetworkCategory;
 import com.foodsafety.entity.FoodSample;
+import com.foodsafety.entity.NodeLayout;
 import com.foodsafety.repository.FoodSampleRepository;
+import com.foodsafety.repository.NodeLayoutRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -14,17 +21,15 @@ import java.util.stream.Collectors;
 public class NetworkService {
 
     private final FoodSampleRepository repository;
+    private final NodeLayoutRepository nodeLayoutRepository;
 
-    // Substrate network categories (by grade severity)
     private static final List<NetworkCategory> SUBSTRATE_CATEGORIES = List.of(
-
             new NetworkCategory("轻微 (Grade 0)"),
             new NetworkCategory("较轻 (Grade 1)"),
             new NetworkCategory("中等 (Grade 2)"),
             new NetworkCategory("严重 (Grade 3)")
     );
 
-    // Catalyst network categories (by attribute type)
     private static final List<NetworkCategory> CATALYST_CATEGORIES = List.of(
             new NetworkCategory("省份"),
             new NetworkCategory("食品类别"),
@@ -32,24 +37,62 @@ public class NetworkService {
             new NetworkCategory("违规项目")
     );
 
-    /**
-     * Build the substrate (sample) network.
-     * Nodes = food samples (up to maxNodes), coloured by grade.
-     * Edges = connect samples sharing the same (foodCategory + adulterantCategory).
-     */
-    public NetworkData buildSubstrateNetwork(String region, String category,
-                                              String adulterantCategory, String adulterants,
-                                              int maxNodes) {
-        List<FoodSample> samples = repository.findByFilters(region, category, adulterantCategory,adulterants,"AND");
+    // =========================================================================
+    // 保存图谱布局
+    // =========================================================================
+    @Transactional
+    public void saveLayout(LayoutSave dto) {
+        String filterKey = dto.getFilterKey();
+        System.out.println("\n【布局保存】filterKey = " + filterKey);
+        System.out.println("【布局保存】待保存节点数量 = " + dto.getNodes().size());
 
-        // Limit to maxNodes using deterministic shuffle for reproducibility
+        // 删除旧布局
+        nodeLayoutRepository.deleteByFilterKey(filterKey);
+
+        // 插入新布局
+        List<NodeLayout> layoutList = dto.getNodes().stream().map(node -> {
+            NodeLayout layout = new NodeLayout();
+            layout.setFilterKey(filterKey);
+            layout.setNodeId(node.getId());
+            layout.setX(Double.valueOf(node.getX()));
+            layout.setY(Double.valueOf(node.getY()));
+            return layout;
+        }).collect(Collectors.toList());
+
+        nodeLayoutRepository.saveAll(layoutList);
+        System.out.println("【布局保存】✅ 保存成功！\n");
+    }
+
+    // =========================================================================
+    // 根据 filterKey 获取布局
+    // =========================================================================
+    public List<NodeLayout> getLayoutByFilterKey(String filterKey) {
+        if (filterKey == null || filterKey.isBlank()) {
+            return Collections.emptyList();
+        }
+        return nodeLayoutRepository.findByFilterKey(filterKey);
+    }
+
+    // =========================================================================
+    // 构建样本网络（Substrate）
+    // =========================================================================
+    public NetworkData buildSubstrateNetwork(
+            String region,
+            String category,
+            String adulterantCategory,
+            String adulterants,
+            int maxNodes,
+            String filterKey
+    ) {
+        List<FoodSample> samples = repository.findByFilters(region, category, adulterantCategory, adulterants, "AND");
+
         if (samples.size() > maxNodes) {
             List<FoodSample> mutable = new ArrayList<>(samples);
             Collections.shuffle(mutable, new Random(42));
             samples = mutable.subList(0, maxNodes);
         }
 
-        // Build nodes
+        // 构建节点
         List<NetworkNode> nodes = new ArrayList<>();
         for (FoodSample s : samples) {
             Map<String, Object> props = new LinkedHashMap<>();
@@ -64,18 +107,20 @@ public class NetworkService {
             props.put("grade", s.getGrade());
 
             int gradeVal = s.getGrade() != null ? s.getGrade() : 0;
-            int symbolSize = 6 + gradeVal * 3; // size scales with severity
+            int symbolSize = 6 + gradeVal * 3;
 
             nodes.add(new NetworkNode(
                     String.valueOf(s.getId()),
                     "样品#" + s.getId(),
                     gradeVal,
                     symbolSize,
-                    props
+                    props,
+                    null,
+                    null
             ));
         }
 
-        // Build edges: group by (foodCategory + adulterantCategory) and link within each group
+        // 构建边
         Map<String, List<String>> groupMap = new HashMap<>();
         for (FoodSample s : samples) {
             String key = s.getFoodCategory() + "||" + s.getAdulterantCategory();
@@ -88,13 +133,11 @@ public class NetworkService {
         for (List<String> group : groupMap.values()) {
             if (group.size() < 2) continue;
 
-            // 获取组内样本的完整信息
             Map<String, FoodSample> sampleMap = new HashMap<>();
             for (FoodSample s : samples) {
                 sampleMap.put(String.valueOf(s.getId()), s);
             }
 
-            // 全连接 + 计算权重
             for (int i = 0; i < group.size(); i++) {
                 for (int j = i + 1; j < group.size(); j++) {
                     String id1 = group.get(i);
@@ -102,11 +145,8 @@ public class NetworkService {
 
                     FoodSample a = sampleMap.get(id1);
                     FoodSample b = sampleMap.get(id2);
-
-                    // 计算相似度权重
                     double weight = calculateSimilarity(a, b);
 
-                    // 只有相似度 > 0 才连线（可选：设置阈值）
                     if (weight > 0) {
                         String edgeKey = id1 + "-" + id2;
                         if (edgeSet.add(edgeKey)) {
@@ -117,82 +157,79 @@ public class NetworkService {
             }
         }
 
-        return new NetworkData(nodes, edges, SUBSTRATE_CATEGORIES);
+        NetworkData networkData = new NetworkData(nodes, edges, SUBSTRATE_CATEGORIES);
+
+        // ===================== 【布局缓存：自动赋值 x/y】 =====================
+        if (filterKey != null && !filterKey.isBlank()) {
+            System.out.println("\n【布局加载】传入的 filterKey = " + filterKey);
+
+            List<NodeLayout> layoutList = getLayoutByFilterKey(filterKey);
+            System.out.println("【布局加载】查到坐标数量 = " + layoutList.size());
+
+            if (!layoutList.isEmpty()) {
+                Map<String, NodeLayout> layoutMap = layoutList.stream()
+                        .collect(Collectors.toMap(NodeLayout::getNodeId, it -> it));
+
+                int assignCount = 0;
+                for (NetworkNode node : networkData.getNodes()) {
+                    NodeLayout layout = layoutMap.get(node.getId());
+                    if (layout != null) {
+                        node.setX(layout.getX());
+                        node.setY(layout.getY());
+                        assignCount++;
+                    }
+                }
+                System.out.println("【布局加载】✅ 成功赋值坐标数量 = " + assignCount + "\n");
+            } else {
+                System.out.println("【布局加载】⚠️ 未找到缓存坐标，将自动布局\n");
+            }
+        }
+
+        return networkData;
     }
-    /**
-     * 计算两个样本的相似度权重
-     * 返回值范围：0-10
-     */
+
+    // =========================================================================
+    // 计算样本相似度
+    // =========================================================================
     private double calculateSimilarity(FoodSample a, FoodSample b) {
         double weight = 0;
 
-        // 1. 相同具体违规项目（最强关联，+3）
-        if (a.getAdulterants() != null && a.getAdulterants().equals(b.getAdulterants())) {
-            weight += 3;
-        }
-
-        // 2. 相同违规类型（强关联，+2）
-        if (a.getAdulterantCategory() != null && a.getAdulterantCategory().equals(b.getAdulterantCategory())) {
-            weight += 2;
-        }
-
-        // 3. 相同食品类别（+1）
-        if (a.getFoodCategory() != null && a.getFoodCategory().equals(b.getFoodCategory())) {
-            weight += 1;
-        }
-
-        // 4. 相同省份（+1）
-        if (a.getProductionLocation() != null && a.getProductionLocation().equals(b.getProductionLocation())) {
-            weight += 1;
-        }
-
-        // 5. 相同城市（+1，更精细）
-        if (a.getProductionLocation2() != null && a.getProductionLocation2().equals(b.getProductionLocation2())) {
-            weight += 1;
-        }
-
-        // 6. 相同违规等级（+1）
-        if (a.getGrade() != null && a.getGrade().equals(b.getGrade())) {
-            weight += 1;
-        }
+        if (a.getAdulterants() != null && a.getAdulterants().equals(b.getAdulterants())) weight += 3;
+        if (a.getAdulterantCategory() != null && a.getAdulterantCategory().equals(b.getAdulterantCategory())) weight += 2;
+        if (a.getFoodCategory() != null && a.getFoodCategory().equals(b.getFoodCategory())) weight += 1;
+        if (a.getProductionLocation() != null && a.getProductionLocation().equals(b.getProductionLocation())) weight += 1;
+        if (a.getProductionLocation2() != null && a.getProductionLocation2().equals(b.getProductionLocation2())) weight += 1;
+        if (a.getGrade() != null && a.getGrade().equals(b.getGrade())) weight += 1;
 
         return weight;
     }
-    /**
-     * Build the catalyst (attribute co-occurrence) network.
-     * Nodes = top provinces + top food categories + all adulterant categories + top adulterants.
-     * Edges = how frequently two attribute nodes appear in the same sample.
-     */
-    public NetworkData buildCatalystNetwork(String region, String category,
-                                             String adulterantCategory, String adulterants) {
-        List<FoodSample> samples = repository.findByFilters(region, category, adulterantCategory, adulterants,"AND");
 
-        // ---- Build candidate attribute sets ----
-        // Top 10 provinces by count
+    // =========================================================================
+    // 构建属性网络（Catalyst）
+    // =========================================================================
+    public NetworkData buildCatalystNetwork(
+            String region,
+            String category,
+            String adulterantCategory,
+            String adulterants
+    ) {
+        List<FoodSample> samples = repository.findByFilters(region, category, adulterantCategory, adulterants, "AND");
+
         Map<String, Long> regionCount = samples.stream()
                 .collect(Collectors.groupingBy(FoodSample::getProductionLocation, Collectors.counting()));
         Set<String> topRegions = regionCount.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(10).map(Map.Entry::getKey).collect(Collectors.toSet());
 
-        // All food categories present
-        Set<String> allCategories = samples.stream()
-                .map(FoodSample::getFoodCategory)
-                .collect(Collectors.toSet());
+        Set<String> allCategories = samples.stream().map(FoodSample::getFoodCategory).collect(Collectors.toSet());
+        Set<String> allAdulterantCats = samples.stream().map(FoodSample::getAdulterantCategory).collect(Collectors.toSet());
 
-        // All adulterant categories
-        Set<String> allAdulterantCats = samples.stream()
-                .map(FoodSample::getAdulterantCategory)
-                .collect(Collectors.toSet());
-
-        // Top 15 adulterants by count
         Map<String, Long> adulterantCount = samples.stream()
                 .collect(Collectors.groupingBy(FoodSample::getAdulterants, Collectors.counting()));
         Set<String> topAdulterants = adulterantCount.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(15).map(Map.Entry::getKey).collect(Collectors.toSet());
 
-        // ---- Assign node ids ----
         Map<String, NetworkNode> nodeMap = new LinkedHashMap<>();
 
         for (String r : topRegions) {
@@ -201,7 +238,7 @@ public class NetworkService {
             props.put("type", "省份");
             props.put("count", regionCount.get(r));
             nodeMap.put(nodeId, new NetworkNode(nodeId, r, 0,
-                    (int) Math.min(regionCount.getOrDefault(r, 1L), 60), props));
+                    (int) Math.min(regionCount.getOrDefault(r, 1L), 60), props, null, null));
         }
         for (String c : allCategories) {
             String nodeId = "cat_" + c;
@@ -209,7 +246,8 @@ public class NetworkService {
             Map<String, Object> props = new LinkedHashMap<>();
             props.put("type", "食品类别");
             props.put("count", cnt);
-            nodeMap.put(nodeId, new NetworkNode(nodeId, c, 1, (int) Math.min(cnt / 10 + 10, 50), props));
+            nodeMap.put(nodeId, new NetworkNode(nodeId, c, 1,
+                    (int) Math.min(cnt / 10 + 10, 50), props, null, null));
         }
         for (String ac : allAdulterantCats) {
             String nodeId = "acat_" + ac;
@@ -217,7 +255,8 @@ public class NetworkService {
             Map<String, Object> props = new LinkedHashMap<>();
             props.put("type", "违规类型");
             props.put("count", cnt);
-            nodeMap.put(nodeId, new NetworkNode(nodeId, ac, 2, (int) Math.min(cnt / 8 + 12, 55), props));
+            nodeMap.put(nodeId, new NetworkNode(nodeId, ac, 2,
+                    (int) Math.min(cnt / 8 + 12, 55), props, null, null));
         }
         for (String a : topAdulterants) {
             String nodeId = "adu_" + a;
@@ -225,10 +264,10 @@ public class NetworkService {
             Map<String, Object> props = new LinkedHashMap<>();
             props.put("type", "违规项目");
             props.put("count", cnt);
-            nodeMap.put(nodeId, new NetworkNode(nodeId, a, 3, (int) Math.min(cnt / 5 + 8, 45), props));
+            nodeMap.put(nodeId, new NetworkNode(nodeId, a, 3,
+                    (int) Math.min(cnt / 5 + 8, 45), props, null, null));
         }
 
-        // ---- Build co-occurrence edges ----
         Map<String, Long> cooccurrence = new HashMap<>();
         for (FoodSample s : samples) {
             List<String> attrs = new ArrayList<>();
@@ -238,9 +277,9 @@ public class NetworkService {
             String aduId = "adu_" + s.getAdulterants();
 
             if (nodeMap.containsKey(regionId)) attrs.add(regionId);
-            if (nodeMap.containsKey(catId))    attrs.add(catId);
-            if (nodeMap.containsKey(acatId))   attrs.add(acatId);
-            if (nodeMap.containsKey(aduId))    attrs.add(aduId);
+            if (nodeMap.containsKey(catId)) attrs.add(catId);
+            if (nodeMap.containsKey(acatId)) attrs.add(acatId);
+            if (nodeMap.containsKey(aduId)) attrs.add(aduId);
 
             for (int i = 0; i < attrs.size(); i++) {
                 for (int j = i + 1; j < attrs.size(); j++) {
@@ -250,7 +289,6 @@ public class NetworkService {
             }
         }
 
-        // Keep top 80 edges by weight to avoid clutter
         List<NetworkEdge> edges = cooccurrence.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(80)

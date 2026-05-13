@@ -21,15 +21,37 @@
           <span class="mode-hint">{{ pivotModeHint }}</span>
         </div>
       </div>
-      <span class="network-subtitle">节点 = 食品样本，颜色 = 违规等级，大小 = 严重程度</span>
+      <span class="network-subtitle">节点 = 食品样本 | Ctrl+鼠标拖动可框选</span>
     </div>
-    <div v-if="store.loadingSubstrate" class="loading-mask">
-      <el-icon class="is-loading"><Loading /></el-icon> 加载中...
-    </div>
-    <div ref="chartEl" class="chart" />
-    <div v-if="store.selectedSubstrateIds.length" class="selection-info">
-      已选 {{ store.selectedSubstrateIds.length }} 个样本
-      <el-button size="small" type="warning" @click="clearSelection">清除</el-button>
+
+    <div 
+      class="chart-viewport"
+      @mousedown="onMouseDown"
+      @mousemove="onMouseMove"
+      @mouseup="onMouseUp"
+      @mouseleave="onMouseUp"
+    >
+      <div v-if="store.loadingSubstrate" class="loading-mask">
+        <el-icon class="is-loading"><Loading /></el-icon> 加载中...
+      </div>
+
+      <div ref="chartEl" class="chart" />
+
+      <div
+        v-show="selecting"
+        class="selection-rect"
+        :style="{
+          left: `${Math.min(startX, endX)}px`,
+          top: `${Math.min(startY, endY)}px`,
+          width: `${Math.abs(endX - startX)}px`,
+          height: `${Math.abs(endY - startY)}px`,
+        }"
+      />
+
+      <div v-if="store.selectedSubstrateIds.length" class="selection-info">
+        已选 {{ store.selectedSubstrateIds.length }} 个样本
+        <el-button size="small" type="warning" @click="clearSelection">清除</el-button>
+      </div>
     </div>
   </div>
 </template>
@@ -38,28 +60,48 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
 import { useMainStore } from '../store/index.js'
-
+import { ElMessage } from 'element-plus'
 const store = useMainStore()
 const chartEl = ref(null)
 let chart = null
 
-// ⭐ 添加这些缺失的响应式变量
-const pivotMode = ref('OR')  // 'OR' 或 'AND'
+// 状态
+const pivotMode = ref('OR')
+const selecting = ref(false)
+const startX = ref(0)
+const startY = ref(0)
+const endX = ref(0)
+const endY = ref(0)
+let ctrlPressed = false
+
+let keydownHandler = null
+let keyupHandler = null
+let resizeHandler = null
 
 const pivotModeHint = computed(() => {
-  if (store.selectedSubstrateIds.length === 0) {
-    return '（请先选中样本）'
-  }
-  if (pivotMode.value === 'OR') {
-    return 'OR: 显示包含任一选中属性的催化剂'
-  }
-  return 'AND: 只显示包含所有选中属性的催化剂'
+  if (store.selectedSubstrateIds.length === 0) return '（请先选中样本）'
+  return pivotMode.value === 'OR'
+    ? 'OR: 显示包含任一选中属性的催化剂'
+    : 'AND: 只显示包含所有选中属性的催化剂'
 })
 
-const GRADE_COLORS = ['#52c41a', '#faad14', '#fa8c16', '#f5222d']
+const GRADE_COLORS = ['#52c1a4', '#faad14', '#fa8c16', '#f5222d']
 const GRADE_LABELS = ['轻微(0)', '较轻(1)', '中等(2)', '严重(3)']
 
+// ==============================================
+// 核心：判断是否需要力学布局
+// ==============================================
+function useForceLayout(data) {
+  if (!data || !data.nodes || data.nodes.length === 0) return true
+  return data.nodes.some(n => n.x === null || n.y === null)
+}
+
+// ==============================================
+// 构建配置
+// ==============================================
 function buildOption(data, highlightIds) {
+  const needForce = useForceLayout(data)
+
   const nodes = data.nodes.map(n => {
     const isHighlighted = !highlightIds.size || highlightIds.has(n.id)
     return {
@@ -67,8 +109,10 @@ function buildOption(data, highlightIds) {
       name: n.name,
       category: n.category,
       symbolSize: n.value,
+      x: n.x,
+      y: n.y,
       itemStyle: {
-        color: GRADE_COLORS[n.category] || '#52c41a',
+        color: GRADE_COLORS[n.category] || '#52c1a4',
         opacity: isHighlighted ? 1 : 0.15,
         borderColor: isHighlighted ? '#fff' : 'transparent',
         borderWidth: isHighlighted ? 1 : 0,
@@ -78,33 +122,31 @@ function buildOption(data, highlightIds) {
     }
   })
 
-  const filteredEdges = data.edges.filter(e => (e.value || 1) > 5);
-  const weights = filteredEdges.map(e => e.value || 1);
-  const maxWeight = Math.max(...weights, 1);
-  
-  const getEdgeColor = (weight, maxWeight) => {
-    const ratio = weight / maxWeight;
-    if (ratio >= 0.8) return '#f5222d';
-    if (ratio >= 0.6) return '#fa8c16';
-    if (ratio >= 0.4) return '#fadb14';
-    return '#5bc8f5';
-  };
-  
+  const filteredEdges = data.edges.filter(e => (e.value || 1) > 5)
+  const weights = filteredEdges.map(e => e.value || 1)
+  const maxWeight = Math.max(...weights, 1)
+
+  const getEdgeColor = (weight) => {
+    const ratio = weight / maxWeight
+    if (ratio >= 0.8) return '#f5222d'
+    if (ratio >= 0.6) return '#fa8c16'
+    if (ratio >= 0.4) return '#fadb14'
+    return '#5bc8f5'
+  }
+
   const edges = filteredEdges.map(e => {
-    const weight = e.value || 1;
-    const color = getEdgeColor(weight, maxWeight);
-    
+    const w = e.value || 1
     return {
       source: e.source,
       target: e.target,
-      value: weight,
+      value: w,
       lineStyle: {
-        color: color,
+        color: getEdgeColor(w),
         width: 2,
         opacity: 0.8,
         curveness: 0.1,
-        shadowBlur: weight > maxWeight * 0.7 ? 6 : 0,
-        shadowColor: color,
+        shadowBlur: w > maxWeight * 0.7 ? 6 : 0,
+        shadowColor: getEdgeColor(w),
       },
     }
   })
@@ -114,154 +156,244 @@ function buildOption(data, highlightIds) {
     tooltip: {
       trigger: 'item',
       formatter: (params) => {
-        if (params.dataType === 'edge') {
-          return `关联强度: ${params.data.value}`;
-        }
+        if (params.dataType === 'edge') return `关联强度: ${params.data.value}`
         if (params.dataType !== 'node') return ''
         const p = params.data.extra || {}
         const gradeLabels = { 0: '轻微', 1: '较轻', 2: '中等', 3: '严重' }
         return `
           <div style="font-size:13px;line-height:1.8">
             <b>样品 #${p.id}</b><br/>
-            省份：${p.productionLocation || '-'} ${p.productionLocation2 || ''}<br/>
-            食品类别：${p.foodCategory || '-'}<br/>
-            违规类型：${p.adulterantCategory || '-'}<br/>
-            违规项目：${p.adulterant || '-'}<br/>
-            违规等级：<span style="color:${GRADE_COLORS[p.grade]}">${gradeLabels[p.grade] || '-'}</span><br/>
-            检查级别：${p.mandateLevel || '-'}
+            省份：${p.productionLocation || '-'}</br>
+            食品类别：${p.foodCategory || '-'}</br>
+            违规类型：${p.adulterantCategory || '-'}</br>
+            违规项目：${p.adulterant || '-'}</br>
+            违规等级：${gradeLabels[p.grade] || '-'}
           </div>`
       },
-      backgroundColor: '#1a2540',
-      borderColor: '#3060a0',
-      textStyle: { color: '#e0e8f0' },
     },
     legend: {
-      data: GRADE_LABELS.map((name, i) => ({ name, icon: 'circle', textStyle: { color: GRADE_COLORS[i] } })),
-      top: 4,
-      right: 8,
-      textStyle: { color: '#a0b8d0', fontSize: 11 },
-      itemWidth: 10,
-      itemHeight: 10,
+      data: GRADE_LABELS.map((name, i) => ({
+        name, icon: 'circle', textStyle: { color: GRADE_COLORS[i] }
+      })),
+      top: 4, right: 8, textStyle: { color: '#a0b8d0', fontSize: 11 },
     },
     series: [{
       type: 'graph',
-      layout: 'force',
+      layout: needForce ? 'force' : 'none',
       data: nodes,
       links: edges,
-      categories: data.categories?.map((c, i) => ({ name: GRADE_LABELS[i] || c.name, itemStyle: { color: GRADE_COLORS[i] } })) || [],
+      categories: GRADE_LABELS.map((name, i) => ({ name, itemStyle: { color: GRADE_COLORS[i] } })),
       roam: true,
       draggable: true,
-      force: {
-        repulsion: 300,
-        gravity: 0.03,
-        edgeLength: [80, 150],
+      force: needForce ? {
+        repulsion: 220,
+        gravity: 0.01,
+        edgeLength: [80, 140],
         layoutAnimation: true,
-        initIterations: 300,
-        iterations: 200,
+      } : {
+        repulsion: 0,
+        gravity: 0,
+        edgeLength: 0,
+        layoutAnimation: false,
       },
-      emphasis: {
-        focus: 'adjacency',
-        lineStyle: { width: 2 },
-      },
+      emphasis: { focus: 'adjacency' },
       selectedMode: 'multiple',
-      select: {
-        itemStyle: { borderColor: '#5bc8f5', borderWidth: 2, color: '#5bc8f5' },
-      },
+      select: { itemStyle: { borderColor: '#5bc8f5', borderWidth: 3, color: '#5bc8f5' } },
     }],
   }
 }
 
-// ⭐ 添加 setPivotMode 方法
-async function setPivotMode(mode) {
-  pivotMode.value = mode
+// 把变量放到函数外，全局唯一，才能真正锁住
+let saveTimer = null
+let isLayoutSaved = false
+
+function listenAndSaveLayout() {
+  if (!chart) return
+
+  // 【关键】每次进来先清空旧事件 + 清空定时器
+  chart.off('rendered')
+  clearTimeout(saveTimer)
   
-  if (store.selectedSubstrateIds.length === 0) {
-    return
-  }
-  
-  // 调用 store 的方法更新 Catalyst 高亮
-  // 注意：这里调用的是 store.onSubstrateSelected，它会触发 API 请求
-  console.log(`切换到 ${mode} 模式，更新属性网络...`)
-  await store.onSubstrateSelected(store.selectedSubstrateIds,mode)
+  // 重置保存状态（每次重新布局时允许再次保存）
+  isLayoutSaved = false
+
+  chart.on('rendered', () => {
+    // 已经保存过，直接跳过
+    if (isLayoutSaved) return
+
+    // 标准防抖：动一次就清掉之前的定时器
+    clearTimeout(saveTimer)
+
+    saveTimer = setTimeout(() => {
+      const seriesIndex = 0
+      const data = chart.getModel().getSeriesByIndex(seriesIndex).getData()
+
+      const layout = store.substrateNetwork.nodes.map((node, idx) => {
+        const point = data.getItemLayout(idx)
+        let x = point ? Math.round(point[0]) : 0
+        let y = point ? Math.round(point[1]) : 0
+
+        x = Math.max(-9999, Math.min(9999, x))
+        y = Math.max(-9999, Math.min(9999, y))
+
+        return { id: node.id, x, y }
+      })
+
+      console.log('✅ 布局已完全稳定，保存坐标')
+      store.saveSubstrateLayout(layout)
+      
+      // ✅ 只会弹一次
+      ElMessage.success('布局保存成功！')
+
+      // 锁定：保存后不再执行
+      isLayoutSaved = true
+      chart.off('rendered')
+      clearTimeout(saveTimer)
+    }, 2500)
+  })
 }
 
+// OR/AND
+async function setPivotMode(mode) {
+  pivotMode.value = mode
+  if (store.selectedSubstrateIds.length === 0) return
+  await store.onSubstrateSelected(store.selectedSubstrateIds, mode)
+}
+
+// 初始化
 function initChart() {
   if (!chartEl.value) return
   chart = echarts.init(chartEl.value, 'dark')
 
   chart.on('selectchanged', (evt) => {
     const selectedIndices = new Set()
-    
-    if (evt.selected && evt.selected[0]) {
-      const selectedSeries = evt.selected[0]
-      selectedSeries.dataIndex?.forEach(idx => selectedIndices.add(idx))
+    if (evt.selected?.[0]) {
+      evt.selected[0].dataIndex?.forEach(idx => selectedIndices.add(idx))
     }
-    
-    const ids = Array.from(selectedIndices).map(idx => {
-      const node = store.substrateNetwork.nodes[idx]
-      return node ? node.id : null
-    }).filter(Boolean)
-    
-    if (JSON.stringify(ids) !== JSON.stringify(store.selectedSubstrateIds)) {
-      store.selectedSubstrateIds = ids
-      
-      if (ids.length === 0) {
-        // 没有选中时，清空 Catalyst 高亮
-        store.highlightAttrIds = new Set()
-      }
-      // 注意：有选中时，不自动更新 Catalyst，等待用户点击 OR/AND 按钮
-    }
-  })
-
-  chart.on('dblclick', () => {
-    chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: 'all' })
-    store.selectedSubstrateIds = []
-    store.highlightAttrIds = new Set()
+    const ids = Array.from(selectedIndices).map(idx => store.substrateNetwork.nodes[idx]?.id).filter(Boolean)
+    store.selectedSubstrateIds = ids
   })
 }
 
+// 渲染
 function renderChart() {
-  if (!chart) return
+  if (!chart || !store.substrateNetwork) return
+
   const option = buildOption(store.substrateNetwork, store.highlightSampleIds)
   chart.setOption(option, true)
+
+  if (useForceLayout(store.substrateNetwork)) {
+    nextTick(() => listenAndSaveLayout())
+  }
 }
 
+// 框选
+function onMouseDown(e) {
+  if (!ctrlPressed) return
+  const rt = chartEl.value.getBoundingClientRect()
+  selecting.value = true
+  startX.value = e.clientX - rt.left
+  startY.value = e.clientY - rt.top
+  endX.value = startX.value
+  endY.value = startY.value
+  e.preventDefault()
+  e.stopPropagation()
+}
+function onMouseMove(e) {
+  if (!selecting.value) return
+  const rt = chartEl.value.getBoundingClientRect()
+  endX.value = e.clientX - rt.left
+  endY.value = e.clientY - rt.top
+}
+function onMouseUp() {
+  if (!selecting.value) return
+  selecting.value = false
+  doSelect()
+}
+
+// 精准框选
+function doSelect() {
+  if (!chart) return
+  const sx1 = Math.min(startX.value, endX.value)
+  const sx2 = Math.max(startX.value, endX.value)
+  const sy1 = Math.min(startY.value, endY.value)
+  const sy2 = Math.max(startY.value, endY.value)
+  if (sx2 - sx1 < 3 && sy2 - sy1 < 3) return
+
+  const seriesModel = chart.getModel().getSeriesByIndex(0)
+  const data = seriesModel.getData()
+  const cs = seriesModel.coordinateSystem
+  if (!cs?.invTransform) return
+
+  const m = cs.invTransform
+  const x1 = sx1 * m[0] + sy1 * m[2] + m[4]
+  const y1 = sx1 * m[1] + sy1 * m[3] + m[5]
+  const x2 = sx2 * m[0] + sy2 * m[2] + m[4]
+  const y2 = sx2 * m[1] + sy2 * m[3] + m[5]
+
+  chart.dispatchAction({ type: 'unselect', seriesIndex: 0 })
+  const selected = []
+
+  store.substrateNetwork.nodes.forEach((node, idx) => {
+    const p = data.getItemLayout(idx)
+    if (!p) return
+    if (
+      p[0] >= Math.min(x1, x2) && p[0] <= Math.max(x1, x2) &&
+      p[1] >= Math.min(y1, y2) && p[1] <= Math.max(y1, y2)
+    ) {
+      selected.push(idx)
+    }
+  })
+
+  if (selected.length) {
+    chart.dispatchAction({ type: 'select', seriesIndex: 0, dataIndex: selected })
+  }
+}
+
+// 清除
+function clearSelection() {
+  if (chart) chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: 'all' })
+  store.selectedSubstrateIds = []
+  store.highlightAttrIds = new Set()
+  nextTick(() => renderChart())
+}
+
+// 生命周期
 onMounted(async () => {
   await nextTick()
   initChart()
   renderChart()
-  window.addEventListener('resize', () => chart?.resize())
+
+  keydownHandler = (e) => {
+    if (e.key === 'Control' && !e.altKey && !e.shiftKey && !e.metaKey) {
+      ctrlPressed = true
+      chart?.setOption({ series: [{ roam: false }] })
+    }
+  }
+  keyupHandler = (e) => {
+    if (e.key === 'Control') {
+      ctrlPressed = false
+      chart?.setOption({ series: [{ roam: true }] })
+    }
+  }
+  resizeHandler = () => chart?.resize()
+
+  window.addEventListener('keydown', keydownHandler)
+  window.addEventListener('keyup', keyupHandler)
+  window.addEventListener('resize', resizeHandler)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', keydownHandler)
+  window.removeEventListener('keyup', keyupHandler)
+  window.removeEventListener('resize', resizeHandler)
   chart?.dispose()
-  window.removeEventListener('resize', () => chart?.resize())
+  chart = null
 })
 
 watch(() => store.substrateNetwork, renderChart, { deep: true })
-watch(() => store.highlightSampleIds, () => renderChart(), { deep: true })
-
-// ⭐ 修复清除功能
-function clearSelection() {
-  console.log('清除所有选中')
-  
-  if (chart) {
-    chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: 'all' })
-  }
-  
-  // 清空 store 中的选中样本
-  store.selectedSubstrateIds = []
-  
-  // 清空 Catalyst 高亮属性
-  store.highlightAttrIds = new Set()
-  
-  // 重新渲染
-  nextTick(() => {
-    renderChart()
-  })
-}
+watch(() => store.highlightSampleIds, renderChart, { deep: true })
 </script>
-
 <style scoped>
 .network-container {
   position: relative;
@@ -277,15 +409,11 @@ function clearSelection() {
   padding: 8px 12px;
   background: rgba(20, 40, 80, 0.6);
   border-bottom: 1px solid #1e3a5f;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 .header-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
 }
 .network-title {
   font-size: 14px;
@@ -304,39 +432,47 @@ function clearSelection() {
 .mode-hint {
   font-size: 10px;
   color: #a0b8d0;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 2px 6px;
-  border-radius: 4px;
 }
-.chart {
+
+.chart-viewport {
+  position: relative;
   flex: 1;
   min-height: 0;
+  user-select: none;
 }
+.chart {
+  width: 100%;
+  height: 100%;
+}
+
+.selection-rect {
+  position: absolute;
+  border: 1px solid #5bc8f5;
+  background: rgba(91, 200, 245, 0.15);
+  pointer-events: none;
+  z-index: 999;
+}
+
 .loading-mask {
   position: absolute;
   inset: 0;
-  background: rgba(10, 15, 30, 0.8);
+  background: rgba(10,15,30,0.8);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
-  font-size: 16px;
   color: #5bc8f5;
-  gap: 8px;
 }
 .selection-info {
   position: absolute;
   bottom: 8px;
   left: 8px;
-  background: rgba(20, 40, 80, 0.9);
+  background: rgba(20,40,80,0.9);
   border: 1px solid #3060a0;
   border-radius: 4px;
   padding: 4px 10px;
   font-size: 12px;
   color: #7ab8f5;
-  display: flex;
-  align-items: center;
-  gap: 8px;
   z-index: 5;
 }
 </style>
