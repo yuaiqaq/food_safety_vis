@@ -59,8 +59,29 @@ const pivotModeHint = computed(() => {
   return 'AND: 只显示包含所有选中属性的样本'
 })
 
-const TYPE_COLORS = ['#36cfc9', '#597ef7', '#ff7a45', '#ffc53d']
-const TYPE_LABELS = ['省份', '食品类别', '违规类型', '违规项目']
+const TYPE_COLORS = ['#36cfc9', '#597ef7', '#ff7a45', '#ffc53d', '#9f7aea', '#13c2c2', '#95de64', '#40a9ff']
+const VALUE_TRANSLATION = {
+  'Pre-packaged': '预包装',
+  'Bulk weighing': '散装称重',
+  'Nationally Mandated': '国家监督抽检',
+  'Provincially Mandated': '省级监督抽检',
+  manufacturer: '生产企业',
+  eatery: '餐饮单位',
+  restaurant: '餐馆',
+  'chain supermarket': '连锁超市',
+  'online store': '网店',
+  'other supermarket/convenience store': '其他商超/便利店',
+  'wet market': '农贸市场',
+  'wet market/wholesale market': '农贸/批发市场',
+  'wholesale market': '批发市场',
+  'wholesale/retail': '批零经营',
+  cafeteria: '食堂',
+}
+
+function toChinese(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  return VALUE_TRANSLATION[value] || value
+}
 
 // 边颜色配置
 const EDGE_COLORS = {
@@ -104,12 +125,14 @@ function getEdgeStyle(weight, maxWeight) {
 }
 
 function buildOption(data, highlightIds) {
+  const typeLabels = (data.categories || []).map(c => c.name)
   const nodes = data.nodes.map(n => {
     const isHighlighted = !highlightIds.size || highlightIds.has(n.id)
     const baseColor = TYPE_COLORS[n.category] || '#597ef7'
+    const displayName = toChinese(n.name)
     return {
       id: n.id,
-      name: n.name,
+      name: displayName,
       category: n.category,
       symbolSize: Math.max(12, Math.min(n.value, 55)),
       itemStyle: {
@@ -122,7 +145,7 @@ function buildOption(data, highlightIds) {
         show: n.value > 12,
         color: '#d0e8ff',
         fontSize: 10,
-        formatter: n.name.length > 10 ? n.name.slice(0, 10) + '…' : n.name,
+        formatter: displayName.length > 10 ? displayName.slice(0, 10) + '…' : displayName,
       },
       extra: n.properties,
     }
@@ -154,11 +177,11 @@ function buildOption(data, highlightIds) {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item',
-      formatter: (params) => {
-        if (params.dataType === 'node') {
-          const p = params.data.extra || {}
-          return `<b>${params.data.name}</b><br/>类型：${p.type || TYPE_LABELS[params.data.category]}<br/>样本数：${p.count || '-'}`
-        }
+        formatter: (params) => {
+          if (params.dataType === 'node') {
+            const p = params.data.extra || {}
+            return `<b>${params.data.name}</b><br/>类型：${p.type || typeLabels[params.data.category]}<br/>样本数：${p.count || '-'}`
+          }
         if (params.dataType === 'edge') {
           const weight = params.data.value
           const ratio = weight / maxWeight
@@ -183,7 +206,7 @@ function buildOption(data, highlightIds) {
     },
     legend: {
       data: [
-        ...TYPE_LABELS.map((name, i) => ({ name, icon: 'circle', textStyle: { color: TYPE_COLORS[i] } })),
+        ...typeLabels.map((name, i) => ({ name, icon: 'circle', textStyle: { color: TYPE_COLORS[i] } })),
         { name: '极强关联 (>80%)', icon: 'circle', textStyle: { color: EDGE_COLORS.VERY_STRONG } },
         { name: '强关联 (60-80%)', icon: 'circle', textStyle: { color: EDGE_COLORS.STRONG } },
         { name: '中等关联 (40-60%)', icon: 'circle', textStyle: { color: EDGE_COLORS.MEDIUM } },
@@ -201,7 +224,7 @@ function buildOption(data, highlightIds) {
       layout: 'force',
       data: nodes,
       links: edges,
-      categories: TYPE_LABELS.map((name, i) => ({ name, itemStyle: { color: TYPE_COLORS[i] } })),
+      categories: typeLabels.map((name, i) => ({ name, itemStyle: { color: TYPE_COLORS[i] } })),
       roam: true,
       draggable: true,
       force: {

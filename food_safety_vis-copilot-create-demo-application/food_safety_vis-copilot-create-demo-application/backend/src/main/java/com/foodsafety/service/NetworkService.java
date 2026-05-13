@@ -34,7 +34,11 @@ public class NetworkService {
             new NetworkCategory("省份"),
             new NetworkCategory("食品类别"),
             new NetworkCategory("违规类型"),
-            new NetworkCategory("违规项目")
+            new NetworkCategory("违规项目"),
+            new NetworkCategory("包装规格"),
+            new NetworkCategory("抽检级别"),
+            new NetworkCategory("生产经营主体类型"),
+            new NetworkCategory("抽样场所类型")
     );
 
     // =========================================================================
@@ -102,7 +106,9 @@ public class NetworkService {
             props.put("foodCategory", s.getFoodCategory());
             props.put("adulterantCategory", s.getAdulterantCategory());
             props.put("adulterant", s.getAdulterants());
+            props.put("foodSpecModel", s.getFoodSpecModel());
             props.put("mandateLevel", s.getMandateLevel());
+            props.put("manufacturerType", s.getManufacturerType());
             props.put("sampledLocationType", s.getSampledLocationType());
             props.put("grade", s.getGrade());
 
@@ -223,6 +229,10 @@ public class NetworkService {
 
         Set<String> allCategories = samples.stream().map(FoodSample::getFoodCategory).collect(Collectors.toSet());
         Set<String> allAdulterantCats = samples.stream().map(FoodSample::getAdulterantCategory).collect(Collectors.toSet());
+        Set<String> allFoodSpecModels = samples.stream().map(FoodSample::getFoodSpecModel).collect(Collectors.toSet());
+        Set<String> allMandateLevels = samples.stream().map(FoodSample::getMandateLevel).collect(Collectors.toSet());
+        Set<String> allManufacturerTypes = samples.stream().map(FoodSample::getManufacturerType).collect(Collectors.toSet());
+        Set<String> allSampledLocationTypes = samples.stream().map(FoodSample::getSampledLocationType).collect(Collectors.toSet());
 
         Map<String, Long> adulterantCount = samples.stream()
                 .collect(Collectors.groupingBy(FoodSample::getAdulterants, Collectors.counting()));
@@ -267,6 +277,46 @@ public class NetworkService {
             nodeMap.put(nodeId, new NetworkNode(nodeId, a, 3,
                     (int) Math.min(cnt / 5 + 8, 45), props, null, null));
         }
+        for (String fsm : allFoodSpecModels) {
+            if (fsm == null || fsm.isBlank()) continue;
+            String nodeId = "fsm_" + fsm;
+            long cnt = samples.stream().filter(s -> Objects.equals(fsm, s.getFoodSpecModel())).count();
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("type", "包装规格");
+            props.put("count", cnt);
+            nodeMap.put(nodeId, new NetworkNode(nodeId, fsm, 4,
+                    (int) Math.min(cnt / 6 + 10, 45), props, null, null));
+        }
+        for (String ml : allMandateLevels) {
+            if (ml == null || ml.isBlank()) continue;
+            String nodeId = "ml_" + ml;
+            long cnt = samples.stream().filter(s -> Objects.equals(ml, s.getMandateLevel())).count();
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("type", "抽检级别");
+            props.put("count", cnt);
+            nodeMap.put(nodeId, new NetworkNode(nodeId, ml, 5,
+                    (int) Math.min(cnt / 6 + 10, 45), props, null, null));
+        }
+        for (String mft : allManufacturerTypes) {
+            if (mft == null || mft.isBlank()) continue;
+            String nodeId = "mft_" + mft;
+            long cnt = samples.stream().filter(s -> Objects.equals(mft, s.getManufacturerType())).count();
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("type", "生产经营主体类型");
+            props.put("count", cnt);
+            nodeMap.put(nodeId, new NetworkNode(nodeId, mft, 6,
+                    (int) Math.min(cnt / 6 + 10, 45), props, null, null));
+        }
+        for (String slt : allSampledLocationTypes) {
+            if (slt == null || slt.isBlank()) continue;
+            String nodeId = "slt_" + slt;
+            long cnt = samples.stream().filter(s -> Objects.equals(slt, s.getSampledLocationType())).count();
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("type", "抽样场所类型");
+            props.put("count", cnt);
+            nodeMap.put(nodeId, new NetworkNode(nodeId, slt, 7,
+                    (int) Math.min(cnt / 6 + 10, 45), props, null, null));
+        }
 
         Map<String, Long> cooccurrence = new HashMap<>();
         for (FoodSample s : samples) {
@@ -275,11 +325,19 @@ public class NetworkService {
             String catId = "cat_" + s.getFoodCategory();
             String acatId = "acat_" + s.getAdulterantCategory();
             String aduId = "adu_" + s.getAdulterants();
+            String fsmId = "fsm_" + s.getFoodSpecModel();
+            String mlId = "ml_" + s.getMandateLevel();
+            String mftId = "mft_" + s.getManufacturerType();
+            String sltId = "slt_" + s.getSampledLocationType();
 
             if (nodeMap.containsKey(regionId)) attrs.add(regionId);
             if (nodeMap.containsKey(catId)) attrs.add(catId);
             if (nodeMap.containsKey(acatId)) attrs.add(acatId);
             if (nodeMap.containsKey(aduId)) attrs.add(aduId);
+            if (nodeMap.containsKey(fsmId)) attrs.add(fsmId);
+            if (nodeMap.containsKey(mlId)) attrs.add(mlId);
+            if (nodeMap.containsKey(mftId)) attrs.add(mftId);
+            if (nodeMap.containsKey(sltId)) attrs.add(sltId);
 
             for (int i = 0; i < attrs.size(); i++) {
                 for (int j = i + 1; j < attrs.size(); j++) {

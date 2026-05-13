@@ -43,7 +43,7 @@
       </div>
       <div class="selected-nodes">
         <el-tag v-for="nodeId in store.selectedCatalystIds" :key="nodeId" size="small" class="node-tag">
-          {{ nodeId.replace(/^(region_|cat_|acat_|adu_)/, '') }}
+          {{ formatNodeLabel(nodeId) }}
         </el-tag>
       </div>
     </div>
@@ -121,18 +121,59 @@ const typeLabels = {
   categories: '食品类别',
   adulterantCategories: '违规类型',
   adulterants: '违规项目（Top10）',
+  foodSpecModels: '包装规格',
+  mandateLevels: '抽检级别',
+  manufacturerTypes: '生产经营主体类型',
+  sampledLocationTypes: '抽样场所类型',
+}
+
+const VALUE_TRANSLATION = {
+  'Pre-packaged': '预包装',
+  'Bulk weighing': '散装称重',
+  'Nationally Mandated': '国家监督抽检',
+  'Provincially Mandated': '省级监督抽检',
+  manufacturer: '生产企业',
+  eatery: '餐饮单位',
+  restaurant: '餐馆',
+  'chain supermarket': '连锁超市',
+  'online store': '网店',
+  'other supermarket/convenience store': '其他商超/便利店',
+  'wet market': '农贸市场',
+  'wet market/wholesale market': '农贸/批发市场',
+  'wholesale market': '批发市场',
+  'wholesale/retail': '批零经营',
+  cafeteria: '食堂',
+}
+
+function toChinese(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  return VALUE_TRANSLATION[value] || value
+}
+
+function formatNodeLabel(nodeId) {
+  const raw = nodeId.replace(/^(region_|cat_|acat_|adu_|fsm_|ml_|mft_|slt_)/, '')
+  return toChinese(raw)
 }
 
 const profileDisplay = computed(() => {
   const p = store.pivotAttrProfile
   if (!p) return {}
   return {
-    regions: p.regions,
-    categories: p.categories,
-    adulterantCategories: p.adulterantCategories,
-    adulterants: p.adulterants,
+    regions: remapToChinese(p.regions),
+    categories: remapToChinese(p.categories),
+    adulterantCategories: remapToChinese(p.adulterantCategories),
+    adulterants: remapToChinese(p.adulterants),
+    foodSpecModels: remapToChinese(p.foodSpecModels),
+    mandateLevels: remapToChinese(p.mandateLevels),
+    manufacturerTypes: remapToChinese(p.manufacturerTypes),
+    sampledLocationTypes: remapToChinese(p.sampledLocationTypes),
   }
 })
+
+function remapToChinese(data) {
+  if (!data) return {}
+  return Object.fromEntries(Object.entries(data).map(([k, v]) => [toChinese(k), v]))
+}
 </script>
 
 <style scoped>

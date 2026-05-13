@@ -181,6 +181,10 @@ export const useMainStore = defineStore('main', {
       for (const c of Object.keys(profile.categories || {})) attrIds.add('cat_' + c)
       for (const ac of Object.keys(profile.adulterantCategories || {})) attrIds.add('acat_' + ac)
       for (const a of Object.keys(profile.adulterants || {})) attrIds.add('adu_' + a)
+      for (const fsm of Object.keys(profile.foodSpecModels || {})) attrIds.add('fsm_' + fsm)
+      for (const ml of Object.keys(profile.mandateLevels || {})) attrIds.add('ml_' + ml)
+      for (const mft of Object.keys(profile.manufacturerTypes || {})) attrIds.add('mft_' + mft)
+      for (const slt of Object.keys(profile.sampledLocationTypes || {})) attrIds.add('slt_' + slt)
       this.highlightAttrIds = attrIds
       console.log('Highlighted attribute IDs:', attrIds)
     },

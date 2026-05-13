@@ -29,15 +29,24 @@ public class PivotService {
             Set<String> commonCategories = findCommonValues(samples, FoodSample::getFoodCategory);
             Set<String> commonAdulterantCats = findCommonValues(samples, FoodSample::getAdulterantCategory);
             Set<String> commonAdulterants = findCommonValues(samples, FoodSample::getAdulterants);
+            Set<String> commonFoodSpecModels = findCommonValues(samples, FoodSample::getFoodSpecModel);
+            Set<String> commonMandateLevels = findCommonValues(samples, FoodSample::getMandateLevel);
+            Set<String> commonManufacturerTypes = findCommonValues(samples, FoodSample::getManufacturerType);
+            Set<String> commonSampledLocationTypes = findCommonValues(samples, FoodSample::getSampledLocationType);
 
             // 统一转成 { name: count } 结构
             result.put("regions", toCountMap(commonRegions, samples.size()));
             result.put("categories", toCountMap(commonCategories, samples.size()));
             result.put("adulterantCategories", toCountMap(commonAdulterantCats, samples.size()));
             result.put("adulterants", toCountMap(commonAdulterants, samples.size()));
+            result.put("foodSpecModels", toCountMap(commonFoodSpecModels, samples.size()));
+            result.put("mandateLevels", toCountMap(commonMandateLevels, samples.size()));
+            result.put("manufacturerTypes", toCountMap(commonManufacturerTypes, samples.size()));
+            result.put("sampledLocationTypes", toCountMap(commonSampledLocationTypes, samples.size()));
 
             Map<String, Object> maxIntersection = findMaxIntersection(samples.size(),
-                    commonRegions, commonCategories, commonAdulterantCats, commonAdulterants);
+                    commonRegions, commonCategories, commonAdulterantCats, commonAdulterants,
+                    commonFoodSpecModels, commonMandateLevels, commonManufacturerTypes, commonSampledLocationTypes);
             result.put("maxIntersection", maxIntersection);
 
         } else {
@@ -50,11 +59,23 @@ public class PivotService {
                     .collect(Collectors.groupingBy(FoodSample::getAdulterantCategory, Collectors.counting()));
             Map<String, Long> adulterants = samples.stream()
                     .collect(Collectors.groupingBy(FoodSample::getAdulterants, Collectors.counting()));
+            Map<String, Long> foodSpecModels = samples.stream()
+                    .collect(Collectors.groupingBy(FoodSample::getFoodSpecModel, Collectors.counting()));
+            Map<String, Long> mandateLevels = samples.stream()
+                    .collect(Collectors.groupingBy(FoodSample::getMandateLevel, Collectors.counting()));
+            Map<String, Long> manufacturerTypes = samples.stream()
+                    .collect(Collectors.groupingBy(FoodSample::getManufacturerType, Collectors.counting()));
+            Map<String, Long> sampledLocationTypes = samples.stream()
+                    .collect(Collectors.groupingBy(FoodSample::getSampledLocationType, Collectors.counting()));
 
             result.put("regions", sortedDesc(regions));
             result.put("categories", sortedDesc(categories));
             result.put("adulterantCategories", sortedDesc(adulterantCats));
             result.put("adulterants", sortedDescTop(adulterants, 10));
+            result.put("foodSpecModels", sortedDesc(foodSpecModels));
+            result.put("mandateLevels", sortedDesc(mandateLevels));
+            result.put("manufacturerTypes", sortedDesc(manufacturerTypes));
+            result.put("sampledLocationTypes", sortedDesc(sampledLocationTypes));
         }
 
         return result;
@@ -91,12 +112,20 @@ public class PivotService {
                                                     Set<String> regions,
                                                     Set<String> categories,
                                                     Set<String> adulterantCats,
-                                                    Set<String> adulterants) {
+                                                    Set<String> adulterants,
+                                                    Set<String> foodSpecModels,
+                                                    Set<String> mandateLevels,
+                                                    Set<String> manufacturerTypes,
+                                                    Set<String> sampledLocationTypes) {
         Map<String, Object> max = null;
         if (!regions.isEmpty()) max = createIntersectionInfo("regions", regions, totalCount);
         if (!categories.isEmpty()) max = createIntersectionInfo("categories", categories, totalCount);
         if (!adulterantCats.isEmpty()) max = createIntersectionInfo("adulterantCategories", adulterantCats, totalCount);
         if (!adulterants.isEmpty()) max = createIntersectionInfo("adulterants", adulterants, totalCount);
+        if (!foodSpecModels.isEmpty()) max = createIntersectionInfo("foodSpecModels", foodSpecModels, totalCount);
+        if (!mandateLevels.isEmpty()) max = createIntersectionInfo("mandateLevels", mandateLevels, totalCount);
+        if (!manufacturerTypes.isEmpty()) max = createIntersectionInfo("manufacturerTypes", manufacturerTypes, totalCount);
+        if (!sampledLocationTypes.isEmpty()) max = createIntersectionInfo("sampledLocationTypes", sampledLocationTypes, totalCount);
         return max;
     }
 
@@ -133,6 +162,10 @@ public class PivotService {
         List<String> categoryList = new ArrayList<>();
         List<String> acList = new ArrayList<>();
         List<String> adList = new ArrayList<>();
+        List<String> fsmList = new ArrayList<>();
+        List<String> mlList = new ArrayList<>();
+        List<String> mftList = new ArrayList<>();
+        List<String> sltList = new ArrayList<>();
 
         for (String nodeId : nodeIds) {
             if (nodeId.startsWith("region_")) {
@@ -143,11 +176,19 @@ public class PivotService {
                 acList.add(nodeId.substring("acat_".length()));
             } else if (nodeId.startsWith("adu_")) {
                 adList.add(nodeId.substring("adu_".length()));
+            } else if (nodeId.startsWith("fsm_")) {
+                fsmList.add(nodeId.substring("fsm_".length()));
+            } else if (nodeId.startsWith("ml_")) {
+                mlList.add(nodeId.substring("ml_".length()));
+            } else if (nodeId.startsWith("mft_")) {
+                mftList.add(nodeId.substring("mft_".length()));
+            } else if (nodeId.startsWith("slt_")) {
+                sltList.add(nodeId.substring("slt_".length()));
             }
         }
 
-        log.info("解析后 网络图条件 -> 地区: {}, 分类: {}, 掺假分类: {}, 掺假物: {}",
-                regionList, categoryList, acList, adList);
+        log.info("解析后 网络图条件 -> 地区: {}, 分类: {}, 掺假分类: {}, 掺假物: {}, 包装规格: {}, 抽检级别: {}, 生产经营主体类型: {}, 抽样场所类型: {}",
+                regionList, categoryList, acList, adList, fsmList, mlList, mftList, sltList);
 
         // ======================
         // 2. 先查【页面筛选的全集】
@@ -174,6 +215,10 @@ public class PivotService {
             String sampleCategory = sample.getFoodCategory();
             String sampleAc = sample.getAdulterantCategory();
             String sampleAd = sample.getAdulterants(); // 样本的掺假物（如 "呈味核苷酸二钠"）
+            String sampleFsm = sample.getFoodSpecModel();
+            String sampleMl = sample.getMandateLevel();
+            String sampleMft = sample.getManufacturerType();
+            String sampleSlt = sample.getSampledLocationType();
 
             if ("AND".equalsIgnoreCase(mode)) {
                 // ----------------------
@@ -182,6 +227,10 @@ public class PivotService {
                 boolean regionOk = regionList.isEmpty() || regionList.contains(sampleRegion);
                 boolean categoryOk = categoryList.isEmpty() || categoryList.contains(sampleCategory);
                 boolean acOk = acList.isEmpty() || acList.contains(sampleAc);
+                boolean fsmOk = fsmList.isEmpty() || fsmList.contains(sampleFsm);
+                boolean mlOk = mlList.isEmpty() || mlList.contains(sampleMl);
+                boolean mftOk = mftList.isEmpty() || mftList.contains(sampleMft);
+                boolean sltOk = sltList.isEmpty() || sltList.contains(sampleSlt);
 
                 // 🔥 关键修复：选中多个掺假物 → 样本必须包含全部
                 boolean adOk;
@@ -189,11 +238,11 @@ public class PivotService {
                     adOk = true;
                 } else {
                     // 样本必须同时拥有所有选中的掺假物
-                    adOk = adList.stream().allMatch(sampleAd::contains);
+                    adOk = sampleAd != null && adList.stream().allMatch(sampleAd::contains);
                 }
 
                 // AND：所有条件必须全部满足
-                match = regionOk && categoryOk && acOk && adOk;
+                match = regionOk && categoryOk && acOk && adOk && fsmOk && mlOk && mftOk && sltOk;
 
             } else {
                 // ----------------------
@@ -202,9 +251,13 @@ public class PivotService {
                 boolean regionOk = !regionList.isEmpty() && regionList.contains(sampleRegion);
                 boolean categoryOk = !categoryList.isEmpty() && categoryList.contains(sampleCategory);
                 boolean acOk = !acList.isEmpty() && acList.contains(sampleAc);
-                boolean adOk = !adList.isEmpty() && adList.contains(sampleAd);
+                boolean adOk = sampleAd != null && !adList.isEmpty() && adList.contains(sampleAd);
+                boolean fsmOk = !fsmList.isEmpty() && fsmList.contains(sampleFsm);
+                boolean mlOk = !mlList.isEmpty() && mlList.contains(sampleMl);
+                boolean mftOk = !mftList.isEmpty() && mftList.contains(sampleMft);
+                boolean sltOk = !sltList.isEmpty() && sltList.contains(sampleSlt);
 
-                match = regionOk || categoryOk || acOk || adOk;
+                match = regionOk || categoryOk || acOk || adOk || fsmOk || mlOk || mftOk || sltOk;
             }
 
             if (match) {
