@@ -39,6 +39,7 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
 import { useMainStore } from '../store/index.js'
+import { translateToChinese } from '../utils/valueTranslation.js'
 
 const store = useMainStore()
 const chartEl = ref(null)
@@ -59,29 +60,8 @@ const pivotModeHint = computed(() => {
   return 'AND: 只显示包含所有选中属性的样本'
 })
 
+// 依次对应：省份、食品类别、违规类型、违规项目、包装规格、抽检级别、生产经营主体类型、抽样场所类型
 const TYPE_COLORS = ['#36cfc9', '#597ef7', '#ff7a45', '#ffc53d', '#9f7aea', '#13c2c2', '#95de64', '#40a9ff']
-const VALUE_TRANSLATION = {
-  'Pre-packaged': '预包装',
-  'Bulk weighing': '散装称重',
-  'Nationally Mandated': '国家监督抽检',
-  'Provincially Mandated': '省级监督抽检',
-  manufacturer: '生产企业',
-  eatery: '餐饮单位',
-  restaurant: '餐馆',
-  'chain supermarket': '连锁超市',
-  'online store': '网店',
-  'other supermarket/convenience store': '其他商超/便利店',
-  'wet market': '农贸市场',
-  'wet market/wholesale market': '农贸/批发市场',
-  'wholesale market': '批发市场',
-  'wholesale/retail': '批零经营',
-  cafeteria: '食堂',
-}
-
-function toChinese(value) {
-  if (value === null || value === undefined || value === '') return '-'
-  return VALUE_TRANSLATION[value] || value
-}
 
 // 边颜色配置
 const EDGE_COLORS = {
@@ -129,7 +109,7 @@ function buildOption(data, highlightIds) {
   const nodes = data.nodes.map(n => {
     const isHighlighted = !highlightIds.size || highlightIds.has(n.id)
     const baseColor = TYPE_COLORS[n.category] || '#597ef7'
-    const displayName = toChinese(n.name)
+    const displayName = translateToChinese(n.name)
     return {
       id: n.id,
       name: displayName,

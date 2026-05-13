@@ -60,6 +60,7 @@
 import { computed } from 'vue'
 import { useMainStore } from '../store/index.js'
 import { InfoFilled } from '@element-plus/icons-vue'
+import { translateToChinese } from '../utils/valueTranslation.js'
 
 const store = useMainStore()
 
@@ -127,32 +128,9 @@ const typeLabels = {
   sampledLocationTypes: '抽样场所类型',
 }
 
-const VALUE_TRANSLATION = {
-  'Pre-packaged': '预包装',
-  'Bulk weighing': '散装称重',
-  'Nationally Mandated': '国家监督抽检',
-  'Provincially Mandated': '省级监督抽检',
-  manufacturer: '生产企业',
-  eatery: '餐饮单位',
-  restaurant: '餐馆',
-  'chain supermarket': '连锁超市',
-  'online store': '网店',
-  'other supermarket/convenience store': '其他商超/便利店',
-  'wet market': '农贸市场',
-  'wet market/wholesale market': '农贸/批发市场',
-  'wholesale market': '批发市场',
-  'wholesale/retail': '批零经营',
-  cafeteria: '食堂',
-}
-
-function toChinese(value) {
-  if (value === null || value === undefined || value === '') return '-'
-  return VALUE_TRANSLATION[value] || value
-}
-
 function formatNodeLabel(nodeId) {
   const raw = nodeId.replace(/^(region_|cat_|acat_|adu_|fsm_|ml_|mft_|slt_)/, '')
-  return toChinese(raw)
+  return translateToChinese(raw)
 }
 
 const profileDisplay = computed(() => {
@@ -172,7 +150,7 @@ const profileDisplay = computed(() => {
 
 function remapToChinese(data) {
   if (!data) return {}
-  return Object.fromEntries(Object.entries(data).map(([k, v]) => [toChinese(k), v]))
+  return Object.fromEntries(Object.entries(data).map(([k, v]) => [translateToChinese(k), v]))
 }
 </script>
 

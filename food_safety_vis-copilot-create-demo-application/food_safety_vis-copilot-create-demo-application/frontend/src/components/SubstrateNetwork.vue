@@ -61,6 +61,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
 import { useMainStore } from '../store/index.js'
 import { ElMessage } from 'element-plus'
+import { translateToChinese } from '../utils/valueTranslation.js'
 const store = useMainStore()
 const chartEl = ref(null)
 let chart = null
@@ -87,29 +88,6 @@ const pivotModeHint = computed(() => {
 
 const GRADE_COLORS = ['#52c1a4', '#faad14', '#fa8c16', '#f5222d']
 const GRADE_LABELS = ['轻微(0)', '较轻(1)', '中等(2)', '严重(3)']
-const VALUE_TRANSLATION = {
-  'Pre-packaged': '预包装',
-  'Bulk weighing': '散装称重',
-  'Nationally Mandated': '国家监督抽检',
-  'Provincially Mandated': '省级监督抽检',
-  manufacturer: '生产企业',
-  eatery: '餐饮单位',
-  restaurant: '餐馆',
-  'chain supermarket': '连锁超市',
-  'online store': '网店',
-  'other supermarket/convenience store': '其他商超/便利店',
-  'wet market': '农贸市场',
-  'wet market/wholesale market': '农贸/批发市场',
-  'wholesale market': '批发市场',
-  'wholesale/retail': '批零经营',
-  cafeteria: '食堂',
-}
-
-function toChinese(value) {
-  if (value === null || value === undefined || value === '') return '-'
-  return VALUE_TRANSLATION[value] || value
-}
-
 // ==============================================
 // 核心：判断是否需要力学布局
 // ==============================================
@@ -189,10 +167,10 @@ function buildOption(data, highlightIds) {
              食品类别：${p.foodCategory || '-'}</br>
              违规类型：${p.adulterantCategory || '-'}</br>
              违规项目：${p.adulterant || '-'}</br>
-             包装规格：${toChinese(p.foodSpecModel)}</br>
-             抽检级别：${toChinese(p.mandateLevel)}</br>
-             生产经营主体类型：${toChinese(p.manufacturerType)}</br>
-             抽样场所类型：${toChinese(p.sampledLocationType)}</br>
+             包装规格：${translateToChinese(p.foodSpecModel)}</br>
+             抽检级别：${translateToChinese(p.mandateLevel)}</br>
+             生产经营主体类型：${translateToChinese(p.manufacturerType)}</br>
+             抽样场所类型：${translateToChinese(p.sampledLocationType)}</br>
              违规等级：${gradeLabels[p.grade] || '-'}
            </div>`
       },
